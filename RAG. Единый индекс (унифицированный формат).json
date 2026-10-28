@@ -1,0 +1,640 @@
+{
+  "name": "RAG. Единый индекс (унифицированный формат)",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "b9433dde-d950-4f49-99d9-cbc099a0eeaf",
+      "name": "When chat message received",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        9568,
+        3760
+      ],
+      "webhookId": "9aee1514-72d7-4760-95ac-6e3293e97711"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "Qwen3.6-35B-A3B-GGUF-BF16-INT-GPU",
+          "mode": "id"
+        },
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "d32957ee-8955-4584-ae93-753e9cc2dfab",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        9696,
+        4288
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "y3i7esRtzdk2ZX2z",
+          "name": "OpenAI account 15"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "contextWindowLength": 10
+      },
+      "id": "0e233e29-e758-4016-b7db-fef09989fb41",
+      "name": "Simple Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        9920,
+        4288
+      ]
+    },
+    {
+      "parameters": {
+        "description": "Поиск договоров и доп. соглашений по смыслу и словам в тексте (предмет, условия, штрафы, сроки оплаты и т.п.). Возвращает реквизиты и фрагменты текста.",
+        "workflowId": {
+          "__rl": true,
+          "value": "08qG4bS89zSGqfxG",
+          "mode": "id",
+          "cachedResultUrl": "/workflow/08qG4bS89zSGqfxG"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "query": "={{ $fromAI('query', `Короткая поисковая фраза юридическим языком, например «неустойка за просрочку оплаты». Пустая строка — если нужен только отбор по реквизитам.`, 'string') }}",
+            "scope": "={{ $fromAI('scope', `Режим: chunks — поиск по тексту пунктов (основной); contracts — список договоров по реквизитам; count — сколько договоров.`, 'string', 'chunks') }}",
+            "contract_number": "={{ $fromAI('contract_number', `Номер договора, если пользователь его назвал. Иначе пустая строка.`, 'string', '') }}",
+            "counterparty_inn": "={{ $fromAI('counterparty_inn', `ИНН контрагента, если пользователь его назвал. Иначе пустая строка.`, 'string', '') }}",
+            "organization_inn": "",
+            "top_k": "={{ $fromAI('top_k', `Сколько фрагментов/договоров вернуть, 1–15. Обычно 8.`, 'number', 8) }}",
+            "min_sum": "={{ $fromAI('min_sum', `Минимальная сумма договора в рублях, если пользователь задал условие по сумме. Иначе 0.`, 'number', 0) }}",
+            "max_sum": "={{ $fromAI('max_sum', `Максимальная сумма договора в рублях, если пользователь задал условие по сумме. Иначе 0.`, 'number', 0) }}",
+            "filters_json": "={{ $('Подготовка отбора').isExecuted ? JSON.stringify($('Подготовка отбора').first().json.filters || {}) : '{}' }}",
+            "user_account": "={{ $('Подготовка отбора').isExecuted ? ($('Подготовка отбора').first().json.user_account || '') : '' }}",
+            "ref": ""
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "query",
+              "displayName": "query",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "scope",
+              "displayName": "scope",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "contract_number",
+              "displayName": "contract_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "counterparty_inn",
+              "displayName": "counterparty_inn",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "organization_inn",
+              "displayName": "organization_inn",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "top_k",
+              "displayName": "top_k",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "min_sum",
+              "displayName": "min_sum",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "max_sum",
+              "displayName": "max_sum",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "filters_json",
+              "displayName": "filters_json",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "user_account",
+              "displayName": "user_account",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "ref",
+              "displayName": "ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "id": "5758484e-c8d1-487b-8fd8-dec2a8f7cd34",
+      "name": "search_contracts",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        10144,
+        4288
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "RAG_Contracts",
+        "responseMode": "lastNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "75b265aa-1a47-4cbf-a1c1-47abc1d49b8f",
+      "name": "Webhook (свой клиент)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        8704,
+        4064
+      ],
+      "webhookId": "f51a4b89-7b6f-4c16-8f04-398516db779a"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "chatInput",
+              "value": "={{ $json.body.chatInput }}",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "sessionId",
+              "value": "={{ $json.body.sessionId }}",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "filtersJson",
+              "value": "={{ JSON.stringify($json.body.filters || {}) }}",
+              "type": "string"
+            },
+            {
+              "id": "a4",
+              "name": "user_account",
+              "value": "={{ $json.body.user_account || $json.body.user || '' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f92874ed-0589-4f8e-ba49-2f271feefd91",
+      "name": "Поля из вебхука",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        9264,
+        4080
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Подготовка отбора: проверка того, что прислала форма (браузер - недоверенный источник).\nconst inp = $input.first().json;\nlet f = {};\ntry { f = inp.filtersJson ? JSON.parse(inp.filtersJson) : {}; } catch (e) { f = {}; }\n\nconst onlyDigits = (v, lens) => { const s = String(v || '').replace(/\\D/g, ''); return lens.includes(s.length) ? s : ''; };\nconst clean = arr => (Array.isArray(arr) ? arr : []).slice(0, 50)\n  .map(o => ({ inn: onlyDigits(o && o.inn, [10, 12]), kpp: onlyDigits(o && o.kpp, [9]), name: String((o && o.name) || '').slice(0, 120) }))\n  .filter(o => o.inn);\nconst isDate = s => /^\\d{4}-\\d{2}-\\d{2}$/.test(String(s || '')) && !isNaN(Date.parse(s));\n\nconst orgs = clean(f.organizations), cps = clean(f.counterparties);\nconst dfrom = isDate(f.date_from) ? f.date_from : null, dto = isDate(f.date_to) ? f.date_to : null;\n\nreturn [{ json: {\n  chatInput: inp.chatInput, sessionId: inp.sessionId, user: inp.user, user_account: String(inp.user_account || ''),\n  filters: { organizations: orgs, counterparties: cps, date_from: dfrom, date_to: dto }\n} }];\n"
+      },
+      "id": "4dfb2655-a49e-448a-88b8-cec8a94d0445",
+      "name": "Подготовка отбора",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        9504,
+        4080
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c6ea7dfe-3b6c-4544-920a-ad60cc27214f",
+              "leftValue": "={{ $json.body.action }}",
+              "rightValue": "document_text",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "dcecb55a-d0f1-4656-837a-a814e6d3281d",
+      "name": "Текст документа?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        8880,
+        4064
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "08qG4bS89zSGqfxG",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "query": "",
+            "scope": "text",
+            "contract_number": "",
+            "counterparty_inn": "",
+            "organization_inn": "",
+            "top_k": 0,
+            "min_sum": 0,
+            "max_sum": 0,
+            "filters_json": "{}",
+            "user_account": "={{ $('Webhook (свой клиент)').first().json.body.user_account || $('Webhook (свой клиент)').first().json.body.user || '' }}",
+            "ref": "={{ $('Webhook (свой клиент)').first().json.body.barcode || $('Webhook (свой клиент)').first().json.body.ref }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "query",
+              "displayName": "query",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "scope",
+              "displayName": "scope",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "contract_number",
+              "displayName": "contract_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "counterparty_inn",
+              "displayName": "counterparty_inn",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "organization_inn",
+              "displayName": "organization_inn",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "top_k",
+              "displayName": "top_k",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "min_sum",
+              "displayName": "min_sum",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "max_sum",
+              "displayName": "max_sum",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "filters_json",
+              "displayName": "filters_json",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "user_account",
+              "displayName": "user_account",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "ref",
+              "displayName": "ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "46dbaaaa-ac97-44f2-8ef8-570904f8447c",
+      "name": "Получить текст документа",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        9056,
+        3872
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ответ для формы в УНИФИЦИРОВАННОМ формате:\n// { output, documents: [{ ref, key, kind, title, subtitle, url, fields: [{label, value, type}], fragments: [{index, label, text}] }], focus, files }\n// Источник - результаты инструмента search_contracts из intermediateSteps (включено в опциях AI Agent).\nconst a = $input.first().json;\nconst output = String(a.output ?? a.text ?? '');\n\n// ---------- ссылка на документ в 1С ----------\n// Навигационная ссылка: e1c://server/<сервер>/<база>#e1cib/data/Справочник.ВнутренниеДокументы?ref=<ссылка>\nconst LINK_BASE = 'e1c://server/mbs-1cappc-01/DOC#e1cib/data/Справочник.ВнутренниеДокументы?ref=';\n// В навигационной ссылке 1С ref - 32 hex-символа в особом порядке. Если contract_ref пришёл как GUID с дефисами\n// (aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee), переставляем: dddd + eeeeeeeeeeee + cccc + bbbb + aaaaaaaa.\n// Если уже 32 символа без дефисов - берём как есть.\nconst navRef = r => {\n  const s = String(r || '').trim().toLowerCase();\n  const m = /^([0-9a-f]{8})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{12})$/.exec(s);\n  return m ? m[4] + m[5] + m[3] + m[2] + m[1] : s;\n};\nconst linkOf = ref1c => (ref1c ? LINK_BASE + navRef(ref1c) : undefined);\n\n// ---------- договор из подпроцесса поиска -> документ унифицированного формата ----------\nconst ru = d => { const m = /^(\\d{4})-(\\d{2})-(\\d{2})/.exec(String(d || '')); return m ? `${m[3]}.${m[2]}.${m[1]}` : (d || ''); };\nconst iso = d => { const m = /^(\\d{4}-\\d{2}-\\d{2})/.exec(String(d || '')); return m ? m[1] : undefined; };\nconst field = (label, value, type) => (value === undefined || value === null || value === '') ? null : (type ? { label, value, type } : { label, value });\nfunction toDocument(c) {\n  const kind = c.document_type || (c.is_amendment ? 'Дополнительное соглашение' : 'Договор');\n  const sum = c.sum === undefined || c.sum === null || c.sum === '' ? undefined : Number(String(c.sum).replace(/[\\s ]/g, '').replace(',', '.'));\n  return {\n    ref: String(c.ref),\n    key: c.number || String(c.ref),                       // агент пишет метки [номер#фрагмент]\n    kind,\n    title: (c.number ? '№ ' + c.number : 'Без номера') + (c.date ? ' от ' + ru(c.date) : ''),\n    subtitle: [c.counterparty, c.title].filter(Boolean).join(' · '),\n    url: linkOf(c.contract_ref),                          // форма делает упоминание документа в ответе гиперссылкой\n    fields: [\n      field('Контрагент', c.counterparty),\n      field('ИНН контрагента', c.counterparty_inn),\n      field('Организация', c.organization),\n      field('Вид договора', c.contract_type),\n      field('Сумма', Number.isFinite(sum) ? sum : c.sum, Number.isFinite(sum) ? 'money' : undefined),\n      field('Валюта', c.currency),\n      field('Действует с', iso(c.valid_from), 'date'),\n      field('Действует по', iso(c.valid_to), 'date'),\n    ].filter(Boolean),\n    fragments: (c.fragments || []).map(f => ({ index: Number(f.chunk_index), text: String(f.text || '').replace(/\\s+/g, ' ') })),\n  };\n}\n\n// ---------- собираем договоры из всех вызовов search_contracts ----------\nconst found = new Map();   // ref -> договор с объединёнными фрагментами\nconst parse = v => { if (typeof v !== 'string') return v; try { return JSON.parse(v); } catch (e) { return null; } };\nconst walk = v => {\n  v = parse(v);\n  if (!v || typeof v !== 'object') return;\n  if (Array.isArray(v)) { v.forEach(walk); return; }\n  if (Array.isArray(v.contracts)) {\n    for (const c of v.contracts) {\n      if (!c || !c.ref) continue;\n      const prev = found.get(c.ref);\n      if (!prev) { found.set(c.ref, { ...c, fragments: [...(c.fragments || [])] }); continue; }\n      const have = new Set(prev.fragments.map(f => f.chunk_index));\n      for (const f of c.fragments || []) if (!have.has(f.chunk_index)) prev.fragments.push(f);\n    }\n  }\n  for (const k of ['json', 'response', 'observation', 'output']) if (k in v && v[k] !== v) walk(v[k]);\n};\nfor (const s of a.intermediateSteps || []) {\n  if (s && s.action && s.action.tool && s.action.tool !== 'search_contracts') continue;\n  walk(s && s.observation);\n}\n\n// сначала документы, на которые агент сослался в тексте, затем остальные найденные\nconst norm = s => String(s == null ? '' : s).toLowerCase().replace(/[\\s№#]/g, '');\nconst text = norm(output);\nconst all = [...found.values()];\nconst cited = all.filter(c => c.number && text.includes(norm(c.number)));\nconst documents = [...cited, ...all.filter(c => !cited.includes(c))].slice(0, 20).map(toDocument);\n\nreturn [{ json: {\n  output,\n  documents,\n  focus: cited.length === 1 ? String(cited[0].ref) : null,\n  files: []\n} }];\n"
+      },
+      "id": "44b43c0d-6952-4d76-851e-f3f9a1234cf5",
+      "name": "Ответ для формы",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        10176,
+        4080
+      ]
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "=Ты — ассистент по поиску информации в договорах компании. Тебе доступен инструмент search_contracts (гибридный поиск: ключевые слова + смысловой).\n\nИНСТРУМЕНТЫ\nsearch_contracts — поиск договоров и дополнительных соглашений по смыслу и по словам в тексте: предмет, условия, неустойки и штрафы, сроки и порядок оплаты, ответственность, расторжение, сроки действия и т.п. Возвращает реквизиты и релевантные фрагменты текста.\n\n\nПравила:\n1. Сначала определи, что именно нужно найти. Ищи всё, что может быть написано в тексте договора: стороны, предмет, цена и сумма договора, НДС, размер штрафов и неустоек, сроки и порядок оплаты, сроки поставки и выполнения работ, срок действия, расторжение, подсудность, ответственность, реквизиты, номера и даты и т.п. Суммы, проценты и сроки из текста договора ищи и выводи — это обычные данные договора. Не ищи только производные данные учёта, которых нет в тексте: фактическую задолженность (дебиторскую и кредиторскую), остатки, фактические оплаты и обороты. На такие вопросы скажи прямо, что этих данных в базе договоров нет.\n2. Основной режим — scope=chunks: поиск по тексту пунктов договоров. В query пиши короткую поисковую фразу юридическим языком, без вводных слов: «неустойка за просрочку оплаты», а не «подскажи, какие там штрафы». Инструмент возвращает фрагменты, сгруппированные по договорам, вместе с реквизитами договора: номер, дата, контрагент и его ИНН, тип документа (договор или дополнительное соглашение), сроки действия.\n3. Если пользователь назвал контрагента по ИНН — передай counterparty_inn, если назвал номер договора — contract_number (вместе с query, в режиме chunks).\n4. Режим scope=contracts используй только для вопросов о самих договорах: «какие договоры с ООО …», «номер и дата договора с ИНН …». Режим scope=count — «сколько договоров …».\n5. Если вопрос сравнительный или широкий («у каких контрагентов…»), делай несколько поисков с разными формулировками и увеличивай top_k (до 15).\n6. Если для ответа не хватает ключевой вводной (неясно, о каком договоре или контрагенте речь, хотя вопрос явно про конкретный договор; либо термин допускает несколько толкований) — задай ОДИН короткий уточняющий вопрос и остановись. Если вопрос можно выполнить без уточнения — сначала ищи, а не спрашивай.\n7. Если результат пустой или слабый — переформулируй запрос (синонимы, другая лексика) или убери лишний фильтр. Не более 4 вызовов поиска на один ответ.\n8. Суммы, проценты и сроки приводи точно так, как они указаны в тексте (с валютой, НДС и условиями), с номером договора и пунктом; сам ничего не пересчитывай и не складывай, если об этом не просили. Отвечай только по найденным фрагментам. К каждому утверждению указывай договор (номер, дату, контрагента) и номер пункта, если он виден в тексте фрагмента. Если фрагмент из дополнительного соглашения (см. document_type) — так и скажи. Если ответа в результатах нет — так и скажи, ничего не выдумывай. Отвечай по-русски, структурно и кратко.\n9. Ссылаясь на конкретный фрагмент договора, ставь после утверждения метку в квадратных скобках: [НОМЕР_ДОГОВОРА#chunk_index], например [12/А#5]. Номер договора и chunk_index бери только из результатов поиска. Если в ответе речь об одном договоре, можно писать короткую метку [#5]. Не придумывай метки и индексы, которых нет в результатах. Форма превратит такие метки в ссылки, которые открывают текст договора и подсвечивают фрагмент.\n\nПользователь может задать предварительный отбор (организации, контрагенты, даты договоров). Он накладывается на каждый поиск автоматически, ты его не видишь, не меняешь и не повторяешь в параметрах инструмента. Если по запросу ничего не найдено, скажи, что причиной может быть слишком узкий отбор.",
+          "maxIterations": 10,
+          "returnIntermediateSteps": true
+        }
+      },
+      "id": "1ac2e7ed-b54b-45f0-9bb1-a6b805d92667",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        9824,
+        4080
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Текст документа для формы в УНИФИЦИРОВАННОМ формате:\n// { ok: true, document: { ref, key, kind, title, subtitle, fields }, chunks: [{ index, label, text }] }  или  { ok: false, error }\nconst r = $input.first().json || {};\nif (!r.ok) return [{ json: { ok: false, error: String(r.error || 'Документ не найден') } }];\n\n// ---------- ссылка на документ в 1С ----------\n// Навигационная ссылка: e1c://server/<сервер>/<база>#e1cib/data/Справочник.ВнутренниеДокументы?ref=<ссылка>\nconst LINK_BASE = 'e1c://server/mbs-1cappc-01/DOC#e1cib/data/Справочник.ВнутренниеДокументы?ref=';\n// В навигационной ссылке 1С ref - 32 hex-символа в особом порядке. Если contract_ref пришёл как GUID с дефисами\n// (aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee), переставляем: dddd + eeeeeeeeeeee + cccc + bbbb + aaaaaaaa.\n// Если уже 32 символа без дефисов - берём как есть.\nconst navRef = r => {\n  const s = String(r || '').trim().toLowerCase();\n  const m = /^([0-9a-f]{8})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{12})$/.exec(s);\n  return m ? m[4] + m[5] + m[3] + m[2] + m[1] : s;\n};\nconst linkOf = ref1c => (ref1c ? LINK_BASE + navRef(ref1c) : undefined);\n\nconst h = r.header || {};\nconst ru = d => { const m = /^(\\d{4})-(\\d{2})-(\\d{2})/.exec(String(d || '')); return m ? `${m[3]}.${m[2]}.${m[1]}` : (d || ''); };\nconst iso = d => { const m = /^(\\d{4}-\\d{2}-\\d{2})/.exec(String(d || '')); return m ? m[1] : undefined; };\nconst field = (label, value, type) => (value === undefined || value === null || value === '') ? null : (type ? { label, value, type } : { label, value });\nconst sum = h.sum === undefined || h.sum === null || h.sum === '' ? undefined : Number(String(h.sum).replace(/[\\s ]/g, '').replace(',', '.'));\n\nconst document = {\n  ref: String(r.ref || ''),\n  key: h.number || String(r.ref || ''),\n  kind: h.document_type || 'Договор',\n  title: (h.number ? '№ ' + h.number : 'Без номера') + (h.date ? ' от ' + ru(h.date) : ''),\n  subtitle: [h.counterparty, h.title].filter(Boolean).join(' · '),\n  url: linkOf(r.contract_ref),\n  fields: [\n    field('Контрагент', h.counterparty),\n    field('Сумма', Number.isFinite(sum) ? sum : h.sum, Number.isFinite(sum) ? 'money' : undefined),\n    field('Валюта', h.currency),\n    field('Действует с', iso(h.valid_from), 'date'),\n    field('Действует по', iso(h.valid_to), 'date'),\n  ].filter(Boolean),\n};\n\nlet chunks = (r.chunks || []).map(c => ({ index: Number(c.i), text: String(c.text || '') }));\n// чанков нет, но есть полный текст - отдаём его одним фрагментом\nif (!chunks.length && r.full_text) chunks = [{ index: 0, label: '', text: String(r.full_text) }];\n\nreturn [{ json: { ok: true, document, chunks } }];\n"
+      },
+      "id": "20b77178-2b69-41f8-b87b-7e09d926f542",
+      "name": "Текст для формы",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        9248,
+        3872
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "search_contracts": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook (свой клиент)": {
+      "main": [
+        [
+          {
+            "node": "Текст документа?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Поля из вебхука": {
+      "main": [
+        [
+          {
+            "node": "Подготовка отбора",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Подготовка отбора": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Ответ для формы",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Текст документа?": {
+      "main": [
+        [
+          {
+            "node": "Получить текст документа",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Поля из вебхука",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Получить текст документа": {
+      "main": [
+        [
+          {
+            "node": "Текст для формы",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "978f49cc-fbd1-43f3-82db-19111e196720",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bccba1f23f710198a673acd7f94582935a0743ece25faeefd8ec6d64ac19e074"
+  },
+  "nodeGroups": [],
+  "id": "flG92cVTk8jeWndE",
+  "tags": []
+}

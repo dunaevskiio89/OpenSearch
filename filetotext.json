@@ -1,0 +1,755 @@
+{
+  "name": "filetotext",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Извлечение текста",
+        "formDescription": "Загрузите документ: PDF (с текстовым слоем), Word (doc/docx) или Excel (xls/xlsx).",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "file",
+              "fieldType": "file",
+              "multipleFiles": false,
+              "acceptFileTypes": ".pdf,.doc,.docx,.xls,.xlsx",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d5e8847d-1e8a-47cb-96d9-61a8999e3fe1",
+      "name": "Form Trigger",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        10864,
+        3120
+      ],
+      "webhookId": "df6b3edb-32c2-4472-b581-4eadb4ac9510"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Определяем тип файла по СОДЕРЖИМОМУ (сигнатуре), затем по имени и MIME.\n// Так работают и multipart-загрузка, и base64 из JSON, и файлы, пришедшие как «bin».\nconst item = $input.item;\nconst binary = item.binary || {};\nconst key = Object.keys(binary)[0];\n\nif (!key) {\n  return { json: { fileType: 'unknown', ext: '', error: item.json.error || 'Нет файла: загрузите его через форму или отправьте на вебхук' } };\n}\n\nconst b = binary[key];\nconst KNOWN = ['pdf', 'png', 'jpg', 'jpeg', 'tif', 'tiff', 'bmp', 'doc', 'docx', 'xls', 'xlsx', 'xlsm'];\nconst MIME = {\n  pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', tif: 'image/tiff', tiff: 'image/tiff', bmp: 'image/bmp',\n  doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',\n  xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',\n  xlsm: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',\n};\n\n// --- 1. сигнатура файла ---\nconst sniff = (buf) => {\n  if (!buf || buf.length < 8) return '';\n  if (buf.slice(0, 4).toString('latin1') === '%PDF') return 'pdf';\n  if (buf[0] === 0x89 && buf.slice(1, 4).toString('latin1') === 'PNG') return 'png';\n  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'jpg';\n  const h4 = buf.slice(0, 4).toString('hex');\n  if (h4 === '49492a00' || h4 === '4d4d002a') return 'tif';\n  if (buf[0] === 0x42 && buf[1] === 0x4d) return 'bmp';\n  if (h4 === '504b0304') {                                   // zip: docx / xlsx\n    if (buf.indexOf('word/document.xml') >= 0) return 'docx';\n    if (buf.indexOf('xl/workbook.xml') >= 0 || buf.indexOf('xl/worksheets/') >= 0) return 'xlsx';\n    return 'zip';\n  }\n  if (buf.slice(0, 8).toString('hex') === 'd0cf11e0a1b11ae1') {   // OLE2: doc / xls\n    if (buf.indexOf(Buffer.from('WordDocument', 'utf16le')) >= 0) return 'doc';\n    if (buf.indexOf(Buffer.from('Workbook', 'utf16le')) >= 0 || buf.indexOf(Buffer.from('Book', 'utf16le')) >= 0) return 'xls';\n    return 'ole';\n  }\n  return '';\n};\n\nlet buf = null;\ntry { buf = await this.helpers.getBinaryDataBuffer($itemIndex, key); } catch (e) { buf = null; }\nlet ext = sniff(buf);\n\n// --- 2. имя файла, потом fileExtension, потом MIME ---\nconst name = String(b.fileName || '');\nif (!ext || ext === 'zip' || ext === 'ole') {\n  const dot = name.lastIndexOf('.');\n  const fromName = dot >= 0 ? name.slice(dot + 1).toLowerCase() : '';\n  const fromExt = String(b.fileExtension || '').toLowerCase();\n  const fromMime = Object.keys(MIME).find(k => MIME[k] === String(b.mimeType || '').toLowerCase()) || '';\n  const guess = [fromName, fromExt, fromMime].find(x => KNOWN.includes(x)) || '';\n  ext = guess || '';\n}\nif (ext === 'xlsm') ext = 'xlsx';\n\n// Тип файла для развилки\nlet fileType = 'unknown';\nif (ext === 'pdf') fileType = 'pdf';\nelse if (['png', 'jpg', 'jpeg', 'tif', 'tiff', 'bmp'].includes(ext)) fileType = 'image';\nelse if (ext === 'docx') fileType = 'docx';\nelse if (ext === 'doc') fileType = 'doc';\nelse if (ext === 'xlsx') fileType = 'xlsx';\nelse if (ext === 'xls') fileType = 'xls';\n\n// Исправляем метаданные файла (после «bin» дальше по цепочке всё должно быть корректно)\nconst dot2 = name.lastIndexOf('.');\nconst base = (dot2 > 0 && name.length - dot2 <= 6) ? name.slice(0, dot2) : (name || 'document');\nconst fixed = fileType === 'unknown' ? b : { ...b, fileName: base + '.' + ext, fileExtension: ext, mimeType: MIME[ext] };\n\nreturn {\n  json: {\n    ext: ext || String(b.fileExtension || ''),\n    fileType,\n  },\n  // Приводим бинарное поле к имени \"file\" (форма и вебхук называют его по-разному)\n  binary: { file: fixed },\n};"
+      },
+      "id": "0db2aed9-31e2-42f0-ba91-d8e0045b1aaf",
+      "name": "Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        11120,
+        3296
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "file",
+        "options": {}
+      },
+      "id": "081bf9e1-8c09-4c26-9b70-51839bfd0139",
+      "name": "Extract PDF text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        11696,
+        2528
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ ($json.text || '').trim().length }}",
+              "rightValue": 50,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3d450ba6-1f2b-4c13-ba50-f5f6c6fce08a",
+      "name": "Есть текстовый слой?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        12032,
+        2528
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "text",
+              "value": "={{ $json.text }}",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "source",
+              "value": "pdf-text-layer",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "pages",
+              "value": "={{ $json.numpages ?? null }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "22600870-7104-4e0a-ae92-b1775c4c4c06",
+      "name": "Text layer",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        12272,
+        2512
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "9332f982-32e2-4b9a-99a7-139a10a777ac",
+                    "leftValue": "={{ $json.fileType }}",
+                    "rightValue": "pdf",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "pdf"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "1209d901-1104-4e7b-979a-acaab80138bb",
+                    "leftValue": "={{ $json.fileType }}",
+                    "rightValue": "docx",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "docx"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "26be17b8-f9c2-40ff-8e9e-1919446f11ea",
+                    "leftValue": "={{ $json.fileType }}",
+                    "rightValue": "doc",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "doc"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "6f9d9143-2124-43dd-8c78-7fe8e6c8f1fd",
+                    "leftValue": "={{ $json.fileType }}",
+                    "rightValue": "xlsx",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "xlsx"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "aaec926d-7dd2-451a-8ef8-878f0e1ce645",
+                    "leftValue": "={{ $json.fileType }}",
+                    "rightValue": "xls",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "xls"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "1885ba2e-5b54-4810-bbf7-2cd0fa149af9",
+                    "leftValue": "={{ $json.fileType }}",
+                    "rightValue": "image",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "image"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "unknown"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        11312,
+        3216
+      ],
+      "id": "9a29ebfe-8bdc-4618-85de-7043a04a1574",
+      "name": "Тип файла"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "binaryPropertyName": "file",
+        "options": {
+          "headerRow": false,
+          "readAsString": true
+        }
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        11824,
+        3072
+      ],
+      "id": "1e12accf-e3dd-451b-b82c-c664c00881f3",
+      "name": "Extract XLSX",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "xls",
+        "binaryPropertyName": "file",
+        "options": {
+          "headerRow": false,
+          "readAsString": true
+        }
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        11824,
+        3232
+      ],
+      "id": "48d3a969-8830-4232-9444-edef15738a02",
+      "name": "Extract XLS",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Строки листа -> текст. Ячейки строки через « | », пустые пропускаем\nconst items = $input.all();\nconst first = items[0] ? items[0].json : {};\nif (items.length === 1 && first.error && Object.keys(first).length === 1) {\n  return [{ json: { text: '', source: 'excel', error: String(first.error.message || first.error) } }];\n}\nconst lines = [];\nfor (const it of items) {\n  const cells = Object.values(it.json)\n    .map(v => String(v ?? '').replace(/\\s+/g, ' ').trim())\n    .filter(Boolean);\n  if (cells.length) lines.push(cells.join(' | '));\n}\nconst text = lines.join('\\n');\nreturn [{ json: { text, source: 'excel', error: text ? null : 'Excel пуст (проверьте, что данные на первом листе)' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        12080,
+        3152
+      ],
+      "id": "f060e9da-477c-44d3-a048-72c7069237f9",
+      "name": "Excel → text",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// .docx — это zip. Помечаем файл как zip, чтобы его распаковал узел Compression\nconst b = $input.item.binary.file;\nreturn {\n  json: $input.item.json,\n  binary: { file: { ...b, fileName: 'document.zip', fileExtension: 'zip', mimeType: 'application/zip' } },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        11728,
+        2704
+      ],
+      "id": "58759b2f-a0a9-4025-9219-e2e7db73abcd",
+      "name": "Prep DOCX",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "binaryPropertyName": "file",
+        "outputPrefix": "z_"
+      },
+      "type": "n8n-nodes-base.compression",
+      "typeVersion": 1.1,
+      "position": [
+        11888,
+        2704
+      ],
+      "id": "0a3593a0-bb9b-4bfe-b20e-490ccec26841",
+      "name": "Unzip DOCX",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// word/document.xml -> текст. Таблицы: ячейки через « | », строки через перевод строки\nconst item = $input.first();\nconst bin = item.binary || {};\nif (item.json && item.json.error && !Object.keys(bin).length) throw new Error(String(item.json.error.message || item.json.error));\nconst key = Object.keys(bin).find(k => bin[k].fileName === 'word/document.xml')\n  || Object.keys(bin).find(k => /document\\.xml$/.test(bin[k].fileName || ''));\nif (!key) throw new Error('В DOCX не найден word/document.xml');\n\nconst xml = (await this.helpers.getBinaryDataBuffer(0, key)).toString('utf8');\n\nconst tok = /<w:tc(?:\\s[^>]*)?>|<\\/w:tc>|<\\/w:tr>|<\\/w:p>|<w:tab\\/>|<w:br[^>]*\\/>|<w:t(?:\\s[^>]*)?>([\\s\\S]*?)<\\/w:t>/g;\nlet out = '';\nlet cell = 0;\nlet m;\nwhile ((m = tok.exec(xml)) !== null) {\n  const t = m[0];\n  if (m[1] !== undefined) out += m[1];\n  else if (t.startsWith('<w:tc')) cell++;\n  else if (t === '</w:tc>') { cell = Math.max(0, cell - 1); out += ' | '; }\n  else if (t === '</w:tr>') out += '\\n';\n  else if (t === '</w:p>') out += cell > 0 ? ' ' : '\\n';\n  else if (t === '<w:tab/>') out += ' ';\n  else out += cell > 0 ? ' ' : '\\n';\n}\n\nconst dec = (s) => s\n  .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))\n  .replace(/&#(\\d+);/g, (_, n) => String.fromCodePoint(Number(n)))\n  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '\"').replace(/&apos;/g, \"'\").replace(/&amp;/g, '&');\n\nconst text = dec(out)\n  .replace(/[ \\t\\u00a0]+/g, ' ')\n  .replace(/( \\| )+\\n/g, '\\n')\n  .replace(/ \\| $/gm, '')\n  .replace(/ +\\n/g, '\\n')\n  .replace(/\\n{3,}/g, '\\n\\n')\n  .trim();\n\nif (text.length < 10) throw new Error('DOCX пуст или содержит только картинки');\nreturn [{ json: { text, source: 'docx' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        12048,
+        2704
+      ],
+      "id": "a212b32d-270f-4d97-ba50-9dce95ff342f",
+      "name": "DOCX → text",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// .doc (Word 97-2003, OLE2) -> текст без внешних сервисов и библиотек\nconst item = $input.first();\nconst key = Object.keys(item.binary || {})[0];\nif (!key) throw new Error('Нет бинарного файла');\nconst buf = await this.helpers.getBinaryDataBuffer(0, key);\n\nif (buf.length > 1 && buf[0] === 0x50 && buf[1] === 0x4b) {\n  throw new Error('Файл с расширением .doc на самом деле DOCX (zip). Переименуйте его в .docx');\n}\nif (buf.slice(0, 5).toString('latin1') === '{\\\\rtf') {\n  throw new Error('Файл с расширением .doc на самом деле RTF. Пересохраните его как DOCX');\n}\nif (buf.readUInt32BE(0) !== 0xd0cf11e0 || buf.readUInt32BE(4) !== 0xa1b11ae1) {\n  throw new Error('Это не Word 97-2003 (.doc): нет сигнатуры OLE2');\n}\n\n// ---------- OLE2 (compound file) ----------\nconst secSize = 1 << buf.readUInt16LE(0x1e);\nconst miniSize = 1 << buf.readUInt16LE(0x20);\nconst cutoff = buf.readUInt32LE(0x38);\nconst sec = (n) => buf.slice((n + 1) * secSize, (n + 2) * secSize);\nconst END = 0xfffffffe;\n\nconst fatSecs = [];\nfor (let i = 0; i < 109; i++) { const s = buf.readUInt32LE(0x4c + i * 4); if (s < 0xfffffffa) fatSecs.push(s); }\nlet dif = buf.readUInt32LE(0x44);\nfor (let c = buf.readUInt32LE(0x48); c > 0 && dif < 0xfffffffa; c--) {\n  const b = sec(dif);\n  for (let i = 0; i < secSize / 4 - 1; i++) { const s = b.readUInt32LE(i * 4); if (s < 0xfffffffa) fatSecs.push(s); }\n  dif = b.readUInt32LE(secSize - 4);\n}\nconst fat = [];\nfor (const s of fatSecs) { const b = sec(s); for (let i = 0; i < secSize / 4; i++) fat.push(b.readUInt32LE(i * 4)); }\n\nconst chain = (start, table) => { const r = []; let s = start, g = 0; while (s < 0xfffffffa && g++ < 1e6) { r.push(s); s = table[s]; } return r; };\nconst readBig = (start) => Buffer.concat(chain(start, fat).map(sec));\n\n// каталог\nconst dir = readBig(buf.readUInt32LE(0x30));\nconst entries = [];\nfor (let o = 0; o + 128 <= dir.length; o += 128) {\n  const len = dir.readUInt16LE(o + 0x40);\n  if (!len) continue;\n  entries.push({\n    name: dir.slice(o, o + len - 2).toString('utf16le'),\n    type: dir[o + 0x42],\n    start: dir.readUInt32LE(o + 0x74),\n    size: dir.readUInt32LE(o + 0x78),\n  });\n}\nconst root = entries.find(e => e.type === 5);\nlet mini = null, miniFat = null;\nconst readStream = (name) => {\n  const e = entries.find(x => x.type === 2 && x.name === name);\n  if (!e) return null;\n  if (e.size < cutoff) {\n    if (!mini) {\n      mini = readBig(root.start);\n      const mf = readBig(buf.readUInt32LE(0x3c));\n      miniFat = []; for (let i = 0; i + 4 <= mf.length; i += 4) miniFat.push(mf.readUInt32LE(i));\n    }\n    return Buffer.concat(chain(e.start, miniFat).map(s => mini.slice(s * miniSize, (s + 1) * miniSize))).slice(0, e.size);\n  }\n  return readBig(e.start).slice(0, e.size);\n};\n\n// ---------- Word: FIB и таблица кусков текста ----------\nconst wd = readStream('WordDocument');\nif (!wd) throw new Error('В файле нет потока WordDocument');\nif (wd.readUInt16LE(0) !== 0xa5ec) throw new Error('Неизвестная версия Word');\nconst flags = wd.readUInt16LE(0x0a);\nif (flags & 0x0100) throw new Error('Документ зашифрован (защищён паролем)');\nconst tbl = readStream((flags & 0x0200) ? '1Table' : '0Table');\nif (!tbl) throw new Error('Не найден поток таблиц (0Table/1Table)');\n\nlet o = 34 + wd.readUInt16LE(32) * 2;       // после fibRgW\nconst cslw = wd.readUInt16LE(o); const lwStart = o + 2; o = lwStart + cslw * 4;\nconst ccpText = wd.readUInt32LE(lwStart + 3 * 4);   // длина основного текста\nconst pairs = o + 2;\nconst fcClx = wd.readUInt32LE(pairs + 33 * 8);\nconst lcbClx = wd.readUInt32LE(pairs + 33 * 8 + 4);\n\nlet p = fcClx; const endClx = fcClx + lcbClx;\nwhile (p < endClx && tbl[p] === 1) p += 3 + tbl.readUInt16LE(p + 1);   // пропускаем Prc\nif (tbl[p] !== 2) throw new Error('Не найден Pcdt (piece table)');\nconst plcLen = tbl.readUInt32LE(p + 1); p += 5;\nconst nPieces = Math.floor((plcLen - 4) / 12);\n\nconst cp1252 = { 0x80: '€', 0x82: '‚', 0x83: 'ƒ', 0x84: '„', 0x85: '…', 0x86: '†', 0x87: '‡', 0x88: 'ˆ', 0x89: '‰', 0x8a: 'Š', 0x8b: '‹', 0x8c: 'Œ', 0x8e: 'Ž', 0x91: '‘', 0x92: '’', 0x93: '“', 0x94: '”', 0x95: '•', 0x96: '–', 0x97: '—', 0x98: '˜', 0x99: '™', 0x9a: 'š', 0x9b: '›', 0x9c: 'œ', 0x9e: 'ž', 0x9f: 'Ÿ' };\nlet raw = '';\nfor (let i = 0; i < nPieces; i++) {\n  const cp0 = tbl.readUInt32LE(p + i * 4), cp1 = tbl.readUInt32LE(p + (i + 1) * 4);\n  if (cp0 >= ccpText) break;\n  const n = Math.min(cp1, ccpText) - cp0;\n  const fcRaw = tbl.readUInt32LE(p + (nPieces + 1) * 4 + i * 8 + 2);\n  if (fcRaw & 0x40000000) {\n    const off = (fcRaw & 0x3fffffff) >>> 1;\n    for (let k = 0; k < n; k++) { const b = wd[off + k]; raw += (cp1252[b] || String.fromCharCode(b)); }\n  } else {\n    raw += wd.slice(fcRaw, fcRaw + n * 2).toString('utf16le');\n  }\n}\n\n// ---------- очистка спецсимволов и полей ----------\nlet s = '', depth = [];\nfor (const ch of raw) {\n  const c = ch.charCodeAt(0);\n  if (c === 0x13) { depth.push('i'); continue; }                 // начало поля\n  if (c === 0x14) { if (depth.length) depth[depth.length - 1] = 'r'; continue; }   // результат поля\n  if (c === 0x15) { depth.pop(); continue; }\n  if (depth.includes('i')) continue;                             // код поля (инструкция) пропускаем\n  if (c === 0x0d || c === 0x0b || c === 0x0c) s += '\\n';\n  else if (c === 0x07) s += '\\x07';\n  else if (c === 0x09 || c === 0xa0) s += ' ';\n  else if (c === 0x1e) s += '-';\n  else if (c < 0x20) continue;\n  else s += ch;\n}\n\n// ---------- таблицы: ячейки « | », строки — с новой строки ----------\nconst tokens = s.split('\\x07');\nconst last = tokens.pop();                       // текст после последней ячейки\nconst lines = [];\nlet row = [], N = null;\nconst flush = () => {\n  const cells = row.map(c => c.replace(/\\s+/g, ' ').trim()).filter(Boolean);\n  if (cells.length) lines.push(cells.join(' | '));\n  if (N === null) N = row.length;\n  row = [];\n};\nfor (let t of tokens) {\n  if (row.length === 0 && t.includes('\\n')) {    // до первой ячейки — обычные абзацы\n    const k = t.lastIndexOf('\\n');\n    lines.push(...t.slice(0, k).split('\\n'));\n    t = t.slice(k + 1);\n    N = null;                                    // новая таблица\n  }\n  if (row.length > 0 && N !== null && row.length >= N) {\n    if (t === '') { flush(); continue; }         // маркер конца строки\n    flush();                                     // строка была короче/длиннее — начинаем новую\n  } else if (row.length > 0 && N === null && t === '' && row.some(c => c.trim())) {\n    flush(); continue;                           // первая строка таблицы закончилась\n  }\n  row.push(t);\n}\nif (row.length) flush();\nlines.push(...last.split('\\n'));\n\nconst text = lines.map(l => l.replace(/[ \\t]+/g, ' ').trim()).join('\\n').replace(/\\n{3,}/g, '\\n\\n').trim();\nif (text.length < 10) throw new Error('DOC пуст или не удалось извлечь текст');\nreturn [{ json: { text, source: 'doc' } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        11888,
+        2880
+      ],
+      "id": "40516092-3b4f-448d-ba38-02bcb3354866",
+      "name": "DOC → text",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "filetotext",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        10736,
+        3440
+      ],
+      "id": "ae95d193-a701-419b-bb98-e8537124b2ec",
+      "name": "Webhook",
+      "webhookId": "24efebf4-5bb1-4058-a508-29662f3d55fe"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Достаём файл из запроса вебхука. Поддерживаются три способа:\n//  1) multipart/form-data (поле с файлом любое, например file);\n//  2) «сырое» тело запроса (application/pdf, application/octet-stream и т.п.);\n//  3) JSON с файлом в base64: {\"ФайлBase64\": \"...\", \"ИмяФайла\": \"акт.pdf\"}.\n// Имя файла (если не пришло вместе с файлом): заголовок X-Filename, параметр ?name=, поле ИмяФайла.\nconst item = $input.item;\nconst j = item.json || {};\nconst body = (j.body && typeof j.body === 'object') ? j.body : {};\nconst query = j.query || {};\nconst headers = j.headers || {};\n\nconst pick = (o, names) => {\n  for (const n of names) {\n    if (o[n] !== undefined && o[n] !== null && o[n] !== '') return o[n];\n  }\n  return undefined;\n};\nconst dec = (s) => { try { return decodeURIComponent(String(s)); } catch (e) { return String(s); } };\nconst nameFromRequest = () => {\n  const n = pick(body, ['ИмяФайла', 'имяФайла', 'fileName', 'filename', 'name'])\n    || headers['x-filename'] || headers['x-file-name'] || query.name || query.filename || query['имя'];\n  return n ? dec(n) : '';\n};\n\n// 1-2) файл уже пришёл как бинарные данные\nconst keys = Object.keys(item.binary || {});\nif (keys.length) {\n  const b = item.binary[keys[0]];\n  const hasExt = /\\.[A-Za-z0-9]{2,5}$/.test(String(b.fileName || ''));\n  const named = nameFromRequest();\n  const fileName = hasExt ? b.fileName : (named || b.fileName || 'document');\n  return { json: j, binary: { file: { ...b, fileName } } };\n}\n\n// 3) base64 в JSON\nlet b64 = pick(body, ['ФайлBase64', 'файлBase64', 'fileBase64', 'file_base64', 'base64', 'file', 'data', 'content']);\nif (typeof b64 === 'string') {\n  let mime = '';\n  const m = /^data:([^;,]*)(?:;[^,]*)?;base64,/i.exec(b64);\n  if (m) { mime = m[1]; b64 = b64.slice(m[0].length); }\n  b64 = b64.replace(/\\s+/g, '');\n  const buf = Buffer.from(b64, 'base64');\n  if (!buf.length) throw new Error('Файл в base64 пустой или повреждён');\n  const bin = await this.helpers.prepareBinaryData(buf, nameFromRequest() || 'document', mime || undefined);\n  return { json: j, binary: { file: bin } };\n}\n\nthrow new Error('В запросе нет файла: пришлите multipart-поле с файлом, сырое тело или JSON {\"ФайлBase64\": \"...\", \"ИмяФайла\": \"...\"}');"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        10928,
+        3440
+      ],
+      "id": "40965b81-88a5-4239-a9a8-a3cfe8b99788",
+      "name": "Файл из вебхука",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ЕДИНЫЙ ВЫВОД: один и тот же набор полей для любого типа файла и для ошибок\nconst j = $json || {};\nlet cfg = {}, file = {};\ntry { const c = $('Config').first(); cfg = c.json || {}; file = (c.binary || {}).file || {}; } catch (e) {}\n\nconst fileType = cfg.fileType || j.fileType || 'unknown';\nconst ext = cfg.ext || j.ext || null;\nconst bySource = { pdf: 'pdf-text-layer', docx: 'docx', doc: 'doc', xlsx: 'excel', xls: 'excel' };\nlet text = String(j.text || '').trim();\nlet error = j.error ? String(j.error.message || j.error) : null;\nlet source = j.source || bySource[fileType] || 'none';\n\nif (fileType === 'image') {\n  text = '';\n  error = 'Изображения не поддерживаются: распознавание (OCR) отключено';\n} else if (fileType === 'pdf' && !j.source) {\n  // ветка «нет текстового слоя»: короткий мусор из PDF не считаем результатом\n  text = '';\n  source = 'none';\n  error = error || 'PDF без текстового слоя (скан): распознавание (OCR) отключено';\n} else if (fileType === 'unknown' && !error) {\n  error = 'Неподдерживаемый формат файла: ' + (ext || '?') + '. Допустимо: pdf, doc, docx, xls, xlsx';\n}\nif (!text && !error) error = 'Текст не извлечён';\n\nreturn {\n  json: {\n    ok: !!text && !error,\n    text,\n    source,                       // pdf-text-layer | docx | doc | excel | none\n    fileType,                     // pdf | image | docx | doc | xlsx | xls | unknown\n    fileName: file.fileName || null,\n    ext,\n    chars: text.length,\n    pages: j.pages ?? null,\n    error,\n  },\n};"
+      },
+      "id": "98ddc1a7-8ace-49c5-856c-aa21c35c23ba",
+      "name": "Единый вывод",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        12672,
+        3392
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "w1",
+              "leftValue": "={{ $('Webhook').isExecuted }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "d248e5fb-4814-4f96-925d-ffef63c3b26f",
+      "name": "Запрос с вебхука?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        12896,
+        3392
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": "={{ $json.ok ? 200 : 422 }}"
+        }
+      },
+      "id": "bed7b5c9-43df-4e58-b75c-1384b0944fe9",
+      "name": "Ответ вебхуку",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        13120,
+        3376
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Form Trigger": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Тип файла",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract PDF text": {
+      "main": [
+        [
+          {
+            "node": "Есть текстовый слой?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Есть текстовый слой?": {
+      "main": [
+        [
+          {
+            "node": "Text layer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Единый вывод",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text layer": {
+      "main": [
+        [
+          {
+            "node": "Единый вывод",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Тип файла": {
+      "main": [
+        [
+          {
+            "node": "Extract PDF text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prep DOCX",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DOC → text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract XLSX",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract XLS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Единый вывод",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Единый вывод",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract XLSX": {
+      "main": [
+        [
+          {
+            "node": "Excel → text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract XLS": {
+      "main": [
+        [
+          {
+            "node": "Excel → text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Excel → text": {
+      "main": [
+        [
+          {
+            "node": "Единый вывод",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep DOCX": {
+      "main": [
+        [
+          {
+            "node": "Unzip DOCX",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unzip DOCX": {
+      "main": [
+        [
+          {
+            "node": "DOCX → text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DOCX → text": {
+      "main": [
+        [
+          {
+            "node": "Единый вывод",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DOC → text": {
+      "main": [
+        [
+          {
+            "node": "Единый вывод",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Файл из вебхука",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Файл из вебхука": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Единый вывод": {
+      "main": [
+        [
+          {
+            "node": "Запрос с вебхука?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Запрос с вебхука?": {
+      "main": [
+        [
+          {
+            "node": "Ответ вебхуку",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "2d8ec52c-a172-49df-88a3-d777ca0fabad",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bccba1f23f710198a673acd7f94582935a0743ece25faeefd8ec6d64ac19e074"
+  },
+  "nodeGroups": [],
+  "id": "MfpZq8Vx3JahFQ6c",
+  "tags": []
+}

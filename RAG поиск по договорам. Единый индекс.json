@@ -1,0 +1,233 @@
+{
+  "name": "RAG поиск по договорам. Единый индекс",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "query"
+            },
+            {
+              "name": "scope"
+            },
+            {
+              "name": "contract_number"
+            },
+            {
+              "name": "counterparty_inn"
+            },
+            {
+              "name": "organization_inn"
+            },
+            {
+              "name": "top_k",
+              "type": "number"
+            },
+            {
+              "name": "min_sum",
+              "type": "number"
+            },
+            {
+              "name": "max_sum",
+              "type": "number"
+            },
+            {
+              "name": "filters_json"
+            },
+            {
+              "name": "user_account"
+            },
+            {
+              "name": "ref"
+            }
+          ]
+        }
+      },
+      "id": "5d13e0e5-5cdc-4f54-a552-bf57cbd23115",
+      "name": "When called by agent",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        2368,
+        1568
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Разбор ответа OpenSearch (единый индекс): договоры + пункты из inner_hits\nconst b = $('Build request').first().json;\nconst r = $input.first().json;\n\nif (r.error) {\n  const e = r.error;\n  const msg = typeof e === 'string' ? e : [e.message, e.description].filter(Boolean).join(': ') || JSON.stringify(e);\n  throw new Error('OpenSearch: ' + String(msg).slice(0, 700));\n}\n\nconst hits = (r.hits && r.hits.hits) || [];\nconst total = r.hits && r.hits.total ? (r.hits.total.value ?? r.hits.total) : hits.length;\n\n// значение по пути 'counterparty.name'\nconst at = (o, path) => {\n  if (o == null) return undefined;\n  if (path in o) return o[path];\n  return path.split('.').reduce((a, key) => (a == null ? undefined : a[key]), o);\n};\nconst day = v => (v ? String(v).slice(0, 10) : undefined);\nconst contractView = s => ({\n  ref: at(s, 'barcode') == null ? undefined : String(at(s, 'barcode')),\n  contract_ref: at(s, 'contract_ref') || undefined,   // ссылка 1С: из неё «Ответ для формы» строит навигационную ссылку   // штрихкод: по нему форма открывает текст, по нему же проверяются права\n  number: at(s, 'registration_number'),\n  date: day(at(s, 'registration_date')),\n  title: at(s, 'title'),\n  document_type: at(s, 'document_type.name'),\n  contract_type: at(s, 'contract_type.name'),\n  counterparty: at(s, 'counterparty.name'),\n  counterparty_inn: at(s, 'counterparty.inn'),\n  organization: at(s, 'organization.name'),\n  sum: at(s, 'sum') ?? undefined,\n  currency: at(s, 'currency') || undefined,\n  valid_from: day(at(s, 'valid_from')),\n  valid_to: day(at(s, 'valid_to')),\n  is_amendment: at(s, 'contract_parent_ref') && at(s, 'contract_parent_ref') !== at(s, 'contract_ref') ? true : undefined\n});\n\n// ---------- scope=text: полный текст договора ----------\nif (b.scope === 'text') {\n  if (!hits.length) return [{ json: { ok: false, error: 'Договор с таким штрихкодом не найден в индексе' } }];\n  const s0 = hits[0]._source || {};\n  const chunks = (Array.isArray(s0.chunks) ? s0.chunks : [])\n    .map(c => ({ i: Number(c.chunk_index), t: c.chunk_type, text: String(c.chunk_text || '') }))\n    .sort((x, y) => x.i - y.i);\n  return [{ json: { ok: true, scope: 'text', ref: b.ref, contract_ref: at(s0, 'contract_ref') || undefined,\n    header: { number: at(s0, 'registration_number'), date: day(at(s0, 'registration_date')), title: at(s0, 'title'), document_type: at(s0, 'document_type.name'),\n              counterparty: at(s0, 'counterparty.name'), valid_from: day(at(s0, 'valid_from')), valid_to: day(at(s0, 'valid_to')),\n              sum: at(s0, 'sum') ?? undefined, currency: at(s0, 'currency') || undefined },\n    full_text: String(s0.full_text || ''),\n    chunks } }];\n}\n\n// ---------- scope=count ----------\nif (b.scope === 'count' && b.rights) {\n  // права проверяются по списку договоров: берём ссылки, число пересчитает «Применить права»\n  return [{ json: { ok: true, applied: b.applied, scope: 'count', raw_total: total ?? null, contracts: hits.map(h => contractView(h._source || {})).filter(c => c.ref) } }];\n}\nif (b.scope === 'count') {\n  return [{ json: { ok: true, applied: b.applied, scope: 'count', total: total ?? null } }];\n}\n\n// ---------- scope=contracts ----------\nif (b.scope === 'contracts') {\n  const contracts = hits.map(h => contractView(h._source || {})).filter(c => c.ref);\n  return [{ json: { ok: true, applied: b.applied, scope: 'contracts', total, contracts,\n                    hint: contracts.length ? undefined : 'Договоры не найдены' } }];\n}\n\n// ---------- scope=chunks: договоры в порядке гибридного ранжирования, пункты из inner_hits ----------\nconst MAXLEN = 1500;\nconst innerOf = (h, name) => ((h.inner_hits && h.inner_hits[name] && h.inner_hits[name].hits && h.inner_hits[name].hits.hits) || [])\n  .map(ih => ih._source || {});\n\nconst contracts = [];\nlet fragments_found = 0;\nlet no_barcode = 0;\nfor (const h of hits.slice(0, b.rights ? b.k_fetch : b.k)) {\n  const sem = innerOf(h, 'sem'), lex = innerOf(h, 'lex');\n  // чередуем: лучший смысловой, лучший по словам, второй смысловой ... без повторов\n  const picked = new Map();\n  for (let i = 0; i < Math.max(sem.length, lex.length) && picked.size < b.frags_per_contract; i++) {\n    for (const c of [sem[i], lex[i]]) {\n      if (!c || picked.size >= b.frags_per_contract) continue;\n      const key = c.chunk_id ?? c.chunk_index;\n      if (!picked.has(key)) picked.set(key, c);\n    }\n  }\n  const fragments = [...picked.values()]\n    .map(c => ({ chunk_index: c.chunk_index, chunk_type: c.chunk_type, text: String(c.chunk_text || '').slice(0, MAXLEN) }))\n    .sort((x, y) => (x.chunk_index ?? 0) - (y.chunk_index ?? 0));\n  if (!fragments.length) continue;\n  const view = contractView(h._source || {});\n  if (!view.ref) { no_barcode++; continue; }   // без штрихкода договор нельзя ни открыть, ни проверить по правам\n  fragments_found += fragments.length;\n  contracts.push({ ...view, fragments });\n}\n\nreturn [{ json: {\n  ok: true, applied: b.applied, scope: 'chunks', fragments_found, contracts,\n  debug: { hits: hits.length, total, filtered: b.filtered, no_barcode },\n  hint: contracts.length ? undefined :\n    (b.filtered ? 'Ничего не найдено в рамках заданного отбора (организации, контрагенты, даты, ИНН, номер, сумма). Возможно, отбор слишком узкий; сообщи об этом пользователю или переформулируй запрос' : 'Ничего не найдено: попробуйте другие формулировки')\n} }];\n"
+      },
+      "id": "77b24245-5f46-49da-8d53-2fd0ce32dc00",
+      "name": "Parse result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3024,
+        1568
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Готовим запрос в 1С (HTTP-сервис RPA): Method + Elements[ { ДоменноеИмяПользователя, МассивСтрокGUID } ] - в массиве штрихкоды договоров\nconst b = $('Build request').first().json;\nconst r = $('Parse result').first().json;\nif (r.ok === false) return [{ json: { skip: true, ok: true, ids: [] } }]; // договор не найден - проверять нечего\nconst account = String($('When called by agent').first().json.user_account || '').trim();\n\nlet ids = [];\nif (b.rights) ids = b.scope === 'text' ? [b.ref] : (r.contracts || []).map(c => c.ref);\nids = [...new Set(ids.map(x => String(x || '').trim()).filter(Boolean))].slice(0, 200);\n\nif (!ids.length) return [{ json: { skip: true, ok: true, ids } }];\nif (!account) return [{ json: { skip: true, ok: false, error: 'не передана учётная запись пользователя', ids } }];\n\nconst S = b.soap;\nconst payload = {\n  Method: S.method,\n  Elements: [ { 'ДоменноеИмяПользователя': account, 'МассивСтрокGUID': ids } ]\n};\nreturn [{ json: { skip: false, url: S.url, payload, ids } }];\n"
+      },
+      "id": "b1608cb3-73a8-4900-a056-9a5d9fee4470",
+      "name": "Запрос прав",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3264,
+        1568
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Вызов HTTP-сервиса 1С с проверкой доступности: любая сетевая ошибка превращается в понятный текст\nconst q = $('Запрос прав').first().json;\nif (q.skip) return [{ json: { skipped: true } }];\nconst S = $('Build request').first().json.soap;\n\nconst opts = {\n  method: 'POST', url: q.url,\n  headers: { 'Content-Type': 'application/json; charset=utf-8', 'Accept': 'application/json' },\n  body: JSON.stringify(q.payload),\n  returnFullResponse: true, ignoreHttpStatusErrors: true, json: false,\n  timeout: S.timeout || 15000\n};\nif (S.login) opts.auth = { username: S.login, password: S.password };\n\nconst HINTS = {\n  EAI_AGAIN: 'не удалось разрешить имя хоста (DNS); используйте IP или extra_hosts/dns в docker',\n  ENOTFOUND: 'имя хоста не найдено (DNS)',\n  ECONNREFUSED: 'соединение отклонено: веб-сервер 1С не слушает этот адрес/порт',\n  ETIMEDOUT: 'таймаут соединения: нет сетевого маршрута или блокирует файрвол/прокси (проверьте NO_PROXY)',\n  ECONNABORTED: 'таймаут ответа: 1С не ответила за ' + ((S.timeout || 15000) / 1000) + ' с',\n  EHOSTUNREACH: 'хост недоступен: нет маршрута до сервера 1С',\n  ENETUNREACH: 'сеть недоступна: нет маршрута до сервера 1С',\n  ECONNRESET: 'соединение сброшено сервером 1С или прокси'\n};\ntry {\n  const r = await this.helpers.httpRequest(opts);\n  const body = typeof r.body === 'string' ? r.body : JSON.stringify(r.body);\n  return [{ json: { statusCode: Number(r.statusCode), body } }];\n} catch (e) {\n  const code = e.code || (e.cause && e.cause.code) || '';\n  const msg = String(e.message || e).split('\\n')[0].slice(0, 200);\n  const hint = HINTS[code] || (/circular|EnvProxy/i.test(msg) ? 'соединение не установлено (проверьте сеть до сервера 1С и NO_PROXY)' : '');\n  return [{ json: { error: 'недоступен сервис 1С ' + q.url + (code ? ' [' + code + ']' : '') + (hint ? ': ' + hint : ': ' + msg) } }];\n}\n"
+      },
+      "id": "890b85a6-44f5-4e48-a89d-8a5eecb551a7",
+      "name": "1C Права",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3488,
+        1568
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Оставляем только то, на что у пользователя есть права по ответу 1С. Нет ответа 1С - ничего не отдаём.\nconst b = $('Build request').first().json;\nconst r = $('Parse result').first().json;\nif (!b.rights || r.ok === false) return [{ json: r }];\n\nconst q = $('Запрос прав').first().json;\nconst fail = msg => [{ json: { ok: false, error: 'Не удалось проверить права доступа: ' + msg,\n  hint: 'Сообщи пользователю, что проверка прав сейчас недоступна и результаты показать нельзя; повторять поиск не нужно' } }];\n\nlet allowed = new Set();\nif (q.skip) {\n  if (q.ok === false) return fail(q.error);\n} else {\n  let h;\n  try { h = $('1C Права').first().json; } catch (e) { return fail('нет ответа от 1С'); }\n  if (h.error) return fail(String(h.error.message || h.error).slice(0, 400));\n  const body = String(h.body ?? h.data ?? '');\n  const status = Number(h.statusCode || 200);\n  if (status >= 400) {\n    const why = status === 401 || status === 403 ? 'нет доступа к сервису (проверьте логин/пароль 1С)' : status === 404 ? 'метод или адрес HTTP-сервиса не найден' : status === 405 ? 'сервис не принимает POST' : '';\n    return fail('1С вернула ошибку ' + status + (why ? ' - ' + why : '') + ': ' + body.replace(/\\s+/g, ' ').trim().slice(0, 300));\n  }\n  // формат ответа не важен (JSON/XML/текст): разбиваем ответ на «слова» и оставляем из запрошенных штрихкодов те, что 1С вернула.\n  // Сравнение точное по целому значению, поэтому штрихкод 123 не совпадёт с 1234.\n  const tokens = new Set((body.match(/[0-9A-Za-zА-Яа-яЁё_\\-\\/.]+/g) || []).map(x => x.toLowerCase()));\n  allowed = new Set(q.ids.map(x => String(x).toLowerCase()).filter(x => tokens.has(x)));\n}\nconst ok = c => c.ref && allowed.has(String(c.ref).toLowerCase());\nconst NONE = 'Среди доступных вам договоров ничего не найдено';\n\nif (r.scope === 'text') {\n  return allowed.has(String(r.ref).toLowerCase()) ? [{ json: r }] : [{ json: { ok: false, error: 'Нет доступа к этому договору' } }];\n}\nconst all = r.contracts || [];\nconst mine = all.filter(ok);\n\nif (r.scope === 'count') {\n  const capped = r.raw_total != null && r.raw_total > all.length;\n  return [{ json: { ok: true, applied: r.applied, scope: 'count', total: mine.length,\n    hint: capped ? 'Подсчёт неполный: проверены первые ' + all.length + ' договоров из ' + r.raw_total + '; предложи сузить отбор' : undefined } }];\n}\nif (r.scope === 'contracts') {\n  const list = mine.slice(0, b.k);\n  return [{ json: { ok: true, applied: r.applied, scope: 'contracts', total: mine.length, contracts: list, hint: list.length ? undefined : (all.length ? NONE : r.hint) } }];\n}\nlet left = b.k;                       // chunks: не больше k фрагментов\nconst contracts = [];\nfor (const c of mine) {\n  if (left <= 0) break;\n  const fr = (c.fragments || []).slice(0, left);\n  left -= fr.length;\n  if (fr.length) contracts.push({ ...c, fragments: fr });\n}\nreturn [{ json: { ok: true, applied: r.applied, scope: 'chunks', debug: r.debug, fragments_found: b.k - left, contracts, hint: contracts.length ? undefined : (all.length ? NONE : r.hint) } }];\n"
+      },
+      "id": "093effff-2cd2-46d5-8fe0-a6c98f2094b7",
+      "name": "Применить права",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3712,
+        1568
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "allowUnauthorizedCerts": true,
+          "timeout": 60000
+        }
+      },
+      "id": "94ad3f23-1356-4f50-8bd4-fb9830073a66",
+      "name": "OpenSearch _search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2816,
+        1568
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "E7efXjWKFr8R5HlV",
+          "name": "Unnamed credential 5"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== НАСТРОЙКИ =====\nconst CFG = {\n  os_url: 'https://192.168.210.233:9200',\n  index: 'contracts_with_chunks',   // единый индекс (алиас): реквизиты + full_text + nested chunks\n  pipeline: 'contracts-hybrid',     // search pipeline для hybrid (normalization-processor)\n  use_hybrid: true,                 // false — bool/should вместо hybrid (если pipeline не создан)\n  expand_nested: false,             // true — от семантики несколько пунктов на договор (expand_nested_docs)\n  sum_numeric: true,                // sum в индексе числовой (scaled_float); false — отбор по сумме не применяется\n  default_k: 8,\n  max_k: 15,\n  frags_per_contract: 3,            // сколько пунктов брать с одного договора\n  rights_enforce: true,   // true - результаты проверяются в 1С по правам пользователя; false - отключить (только для отладки)\n  rights_overfetch: 3,    // во сколько раз больше берём из индекса, т.к. часть договоров отсеется по правам\n  count_cap: 500,         // сколько договоров максимум проверяем при подсчёте (scope=count)\n  // ---- проверка прав в 1С (HTTP-сервис) ----\n  rights_url: 'http://192.168.100.149/DOC/hs/RPA',\n  rights_method: 'AvailableUserDocuments',     // постоянное значение поля Method в теле запроса\n  rights_login: '',                            // Basic-авторизация к HTTP-сервису 1С; пусто - без авторизации\n  rights_password: '',\n  rights_timeout_ms: 15000,\n};\nconst SOAP = { url: CFG.rights_url, method: CFG.rights_method, login: CFG.rights_login, password: CFG.rights_password, timeout: CFG.rights_timeout_ms };\n\n// реквизиты договора из _source (без full_text и без chunks с эмбеддингами)\n// barcode - ключ договора везде: ссылки формы, текст договора, проверка прав в 1С\nconst REQUISITES = [\n  'barcode', 'contract_ref', 'contract_parent_ref', 'registration_number', 'registration_date', 'title',\n  'document_type.name', 'contract_type.name', 'counterparty.name', 'counterparty.inn',\n  'organization.name', 'organization.inn', 'valid_from', 'valid_to', 'sum', 'currency'\n];\n// поля пунктов (chunk_text_semantic_info с эмбеддингом не берём)\nconst CHUNK_SRC = ['chunks.chunk_id', 'chunks.chunk_index', 'chunks.chunk_type', 'chunks.chunk_text'];\n// ======================\n\nconst inp = $input.first().json;\nconst q = String(inp.query || '').trim();\nlet scope = ['contracts', 'count', 'text'].includes(inp.scope) ? inp.scope : 'chunks';\nconst k = Math.min(Number(inp.top_k) || CFG.default_k, CFG.max_k);\nconst RIGHTS = !!CFG.rights_enforce;\nconst kFetch = RIGHTS ? Math.min(k * CFG.rights_overfetch, 60) : k;\nconst minSum = Number(inp.min_sum) > 0 ? Number(inp.min_sum) : 0;\nconst maxSum = Number(inp.max_sum) > 0 ? Number(inp.max_sum) : 0;\n\n// предварительный отбор из формы (организации и контрагенты по ИНН+КПП, дата договора)\nlet ff = {};\nif (inp.filters_json && typeof inp.filters_json === 'object') ff = inp.filters_json;\nelse { try { ff = inp.filters_json ? JSON.parse(inp.filters_json) : {}; } catch (e) { throw new Error('filters_json не разобран: ' + String(inp.filters_json).slice(0, 200)); } }\nif (!ff || typeof ff !== 'object') ff = {};\nconst ffOrgs = Array.isArray(ff.organizations) ? ff.organizations : [];\nconst ffCps = Array.isArray(ff.counterparties) ? ff.counterparties : [];\nconst hasFormFilters = ffOrgs.length > 0 || ffCps.length > 0 || !!ff.date_from || !!ff.date_to;\n\nif (scope !== 'text' && !q && !inp.contract_number && !inp.counterparty_inn && !inp.organization_inn && !hasFormFilters && !minSum && !maxSum) {\n  throw new Error('Пустой запрос: нужен query, contract_number, counterparty_inn или отбор');\n}\n\n// фильтры по реквизитам договора (поля верхнего уровня)\nconst filter = [];\nif (inp.organization_inn) filter.push({ term: { 'organization.inn': String(inp.organization_inn) } });\nif (inp.counterparty_inn) filter.push({ term: { 'counterparty.inn': String(inp.counterparty_inn) } });\nif (inp.contract_number) {\n  const num = String(inp.contract_number).trim();\n  filter.push({ bool: { minimum_should_match: 1, should: [\n    { term: { registration_number: num } },\n    { match_phrase: { 'registration_number.text': num } }\n  ] } });\n}\nif (CFG.sum_numeric && (minSum || maxSum)) {\n  const r = {};\n  if (minSum) r.gte = minSum;\n  if (maxSum) r.lte = maxSum;\n  filter.push({ range: { sum: r } });\n}\n\n// ---- отбор формы: накладывается кодом, как граница поиска (AND с остальными условиями) ----\nconst reqKeys = (path, o) => {\n  const must = [{ term: { [path + '.inn']: String(o.inn) } }];\n  if (o.kpp) must.push({ term: { [path + '.kpp']: String(o.kpp) } });   // у ИП/физлиц КПП нет - тогда по одному ИНН\n  return { bool: { filter: must } };\n};\nconst pairsClause = (path, arr) => {\n  const ok = arr.filter(o => o && /^\\d{10}$|^\\d{12}$/.test(String(o.inn || '')));\n  return ok.length ? { bool: { should: ok.map(o => reqKeys(path, o)), minimum_should_match: 1 } } : null;\n};\nconst orgClause = pairsClause('organization', ffOrgs);\nif (orgClause) filter.push(orgClause);\nconst cpClause = pairsClause('counterparty', ffCps);\nif (cpClause) filter.push(cpClause);\nconst validN = arr => arr.filter(o => o && /^\\d{10}$|^\\d{12}$/.test(String(o.inn || ''))).length;\nconst isIso = s => /^\\d{4}-\\d{2}-\\d{2}$/.test(String(s || ''));\nif (isIso(ff.date_from) || isIso(ff.date_to)) {\n  const r = { format: 'yyyy-MM-dd' };\n  if (isIso(ff.date_from)) r.gte = ff.date_from + '||/d';   // граница включается\n  if (isIso(ff.date_to)) r.lte = ff.date_to + '||/d';       // до конца указанного дня включительно\n  filter.push({ range: { registration_date: r } });\n}\nconst applied = { organizations: validN(ffOrgs), counterparties: validN(ffCps), date_from: isIso(ff.date_from) ? ff.date_from : null, date_to: isIso(ff.date_to) ? ff.date_to : null };\n\nconst base = `${CFG.os_url}/${CFG.index}/_search`;\nconst result = (scopeOut, body, hybrid, extra = {}) => [{ json: {\n  url: hybrid ? `${base}?search_pipeline=${CFG.pipeline}` : base,\n  body, scope: scopeOut, k, k_fetch: kFetch, rights: RIGHTS, applied, soap: SOAP,\n  filtered: filter.length > 0, frags_per_contract: CFG.frags_per_contract, ...extra\n} }];\n\n// scope=text: полный текст одного договора (отбор формы не применяется, права проверяются дальше)\nif (scope === 'text') {\n  const ref = String(inp.ref || '').trim();   // штрихкод договора\n  if (!ref || ref.length > 120) throw new Error('Не передан штрихкод договора');\n  return result('text', {\n    size: 1,\n    _source: { includes: [...REQUISITES, 'full_text', ...CHUNK_SRC] },\n    query: { term: { barcode: ref } }\n  }, false, { ref });\n}\n\n// без текста запроса пункты искать нечем - отдаём договоры по реквизитам\nif (scope === 'chunks' && !q) scope = 'contracts';\n\nif (scope === 'contracts' || scope === 'count') {\n  const body = {\n    size: scope === 'count' ? (RIGHTS ? CFG.count_cap : 0) : kFetch,\n    track_total_hits: true,\n    _source: { includes: REQUISITES },\n    query: { bool: { filter } }\n  };\n  if (q) body.query.bool.must = [{ multi_match: { query: q, fields: ['registration_number.text^3', 'title^2', 'counterparty.name^2', 'full_text'] } }];\n  else body.sort = [{ registration_date: { order: 'desc', missing: '_last' } }];\n  return result(scope, body, false);\n}\n\n// scope=chunks: гибрид BM25 по пунктам + семантика по пунктам, пункты приходят в inner_hits\nconst F = CFG.frags_per_contract;\nconst innerHits = name => ({ name, size: F, _source: { includes: CHUNK_SRC } });\n\nconst lexical = { bool: {\n  must: [{ nested: { path: 'chunks', score_mode: 'max',\n    query: { match: { 'chunks.chunk_text': q } },\n    inner_hits: innerHits('lex') } }],\n  filter\n} };\n\n// фильтры кладём и ВНУТРЬ neural-запроса, иначе они режут уже найденных соседей\nconst neural = { query_text: q, k: Math.max(kFetch * 3, 50) };\nif (filter.length) neural.filter = { bool: { filter } };\nif (CFG.expand_nested) neural.expand_nested_docs = true;\nconst semantic = { bool: {\n  must: [{ nested: { path: 'chunks', score_mode: 'max',\n    query: { neural: { 'chunks.chunk_text': neural } },\n    inner_hits: innerHits('sem') } }],\n  filter\n} };\n\nreturn result('chunks', {\n  size: kFetch,\n  _source: { includes: REQUISITES },\n  query: CFG.use_hybrid\n    ? { hybrid: { queries: [lexical, semantic] } }\n    : { bool: { should: [lexical, semantic], minimum_should_match: 1 } }\n}, CFG.use_hybrid);\n"
+      },
+      "id": "f2d3ec52-1622-4b94-a94f-c4bb2cc95b17",
+      "name": "Build request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2592,
+        1568
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When called by agent": {
+      "main": [
+        [
+          {
+            "node": "Build request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse result": {
+      "main": [
+        [
+          {
+            "node": "Запрос прав",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Запрос прав": {
+      "main": [
+        [
+          {
+            "node": "1C Права",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1C Права": {
+      "main": [
+        [
+          {
+            "node": "Применить права",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenSearch _search": {
+      "main": [
+        [
+          {
+            "node": "Parse result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build request": {
+      "main": [
+        [
+          {
+            "node": "OpenSearch _search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "be653180-d67c-446a-985a-764151c6603c",
+  "meta": {
+    "instanceId": "bccba1f23f710198a673acd7f94582935a0743ece25faeefd8ec6d64ac19e074"
+  },
+  "nodeGroups": [],
+  "id": "08qG4bS89zSGqfxG",
+  "tags": []
+}

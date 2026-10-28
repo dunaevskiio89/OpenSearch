@@ -1,0 +1,488 @@
+{
+  "name": "Assistant 1C to Sync",
+  "nodes": [
+    {
+      "parameters": {
+        "resources": [
+          "Post"
+        ],
+        "events": [
+          "posted"
+        ]
+      },
+      "type": "@artymaximus/n8n-nodes-mattermost-trigger-enhanced.mattermostEnhancedTrigger",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        192
+      ],
+      "id": "6b8b6452-5ac6-4cda-8181-ff12e426e704",
+      "name": "Mattermost Trigger Assistant 1C Sync Bot",
+      "alwaysOutputData": false,
+      "executeOnce": false,
+      "retryOnFail": false,
+      "notesInFlow": false,
+      "credentials": {
+        "mattermostTriggerEnhancedApi": {
+          "id": "ytUQwnd7V1ILjN2G",
+          "name": "Mattermost Trigger Enhanced account 6"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "52e59ab7-00b5-43c6-a0bc-3133f6af9bbf",
+              "leftValue": "={{ $json.data.sender_name }}",
+              "rightValue": "@assistant_1c_bot",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -32,
+        192
+      ],
+      "id": "9802fcfb-f305-4841-be72-470010ba2252",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $('Mattermost Trigger Assistant 1C Sync Bot').first().json;\n\n// В WebSocket-событии Mattermost post часто лежит строкой JSON в data.post\nlet post = input.post || input.data?.post || input.body?.post || null;\n\nif (typeof post === 'string') {\n  try {\n    post = JSON.parse(post);\n  } catch (e) {\n    post = {};\n  }\n}\n\npost = post || {};\n\nconst data = input.data || {};\nconst broadcast = input.broadcast || {};\n\nconst message = (post.message || input.message || '').trim();\n\nconst channelId =\n  post.channel_id ||\n  data.channel_id ||\n  broadcast.channel_id ||\n  input.channel_id ||\n  input.channelId;\n\nconst userId =\n  post.user_id ||\n  data.user_id ||\n  broadcast.user_id ||\n  input.user_id ||\n  input.userId;\n\nconst postId =\n  post.id ||\n  input.post_id ||\n  input.postId;\n\nconst rootId =\n  post.root_id ||\n  post.rootId ||\n  postId;\n\nconst teamId =\n  post.team_id ||\n  data.team_id ||\n  broadcast.team_id ||\n  input.team_id ||\n  input.teamId ||\n  'no-team';\n\nconst channelType =\n  data.channel_type ||\n  input.channel_type ||\n  input.channelType;\n\n// ВАЖНО: вставь сюда user_id бота из Mattermost\nconst BOT_USER_ID = 'ahy7p1cegbdk88awn6g4xiiorr';\n\n// Отсекаем пустые сообщения\nif (!message) {\n  return [];\n}\n\n// Отсекаем сообщения самого бота, чтобы не было бесконечного цикла\nif (userId === BOT_USER_ID) {\n  return [];\n}\n\n// Нас интересуют именно личные сообщения пользователю-боту.\n// В Mattermost direct channel обычно имеет тип D.\nconst isDirectMessage = channelType === 'D';\n\n// Если хочешь реагировать только на личные сообщения боту — оставь так:\nif (!isDirectMessage) {\n  return [];\n}\n\nreturn [\n  {\n    json: {\n      source: 'mattermost',\n      event: input.event || 'posted',\n      message,\n      originalMessage: message,\n      postId,\n      rootId,\n      channelId,\n      channelType,\n      teamId,\n      userId,\n      sessionId: `mm:${teamId}:${channelId}:${userId}`,\n      post,\n      raw: input,\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        192,
+        192
+      ],
+      "id": "ab2f0795-fbec-4a39-a92d-3fbcafd9093b",
+      "name": "Normalize Mattermost Message"
+    },
+    {
+      "parameters": {
+        "jsCode": "const inputResult = $(\"Normalize Mattermost Message\").all();\nconst firstItemJson = inputResult[0].json.post;\nconst timestamp = firstItemJson.create_at;\nconst date = new Date(timestamp);\nconst full_date = date.toISOString();\n\nreturn [{ json: { time_data: full_date } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        384,
+        192
+      ],
+      "id": "880e014a-c39b-4bd6-827f-329726086433",
+      "name": "Code in JavaScript Get Date"
+    },
+    {
+      "parameters": {
+        "url": "=https://sync.iz.ru/api/v4/users/username/{{ $('Mattermost Trigger Assistant 1C Sync Bot').item.json.data.sender_name.replaceAll('@', '') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer ***"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        592,
+        192
+      ],
+      "id": "2e0f9de6-b4eb-4ac8-b6a3-6dac16a56fc2",
+      "name": "HTTP Request GET User Info from Sync"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5014d764-6c9d-4bdd-a08e-a6ebb6cf0ce4",
+              "name": "username",
+              "value": "={{ $json.email.split('@')[1].split('.')[0] + '\\\\' + $json.email.split('@')[0].split('.').map(s => s.charAt(0).toUpperCase() + s.charAt(1).toUpperCase() + s.slice(2)).join('') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        800,
+        192
+      ],
+      "id": "09a1923e-b5c6-4639-8f0d-b3dd091d5ed6",
+      "name": "Edit Fields - convert Username"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "knowledge_base_1C",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        592,
+        0
+      ],
+      "id": "67902b84-21da-47d3-995f-94f9b12b5be6",
+      "name": "Webhook 1C",
+      "webhookId": "b3f6a2d4-8e17-4c59-a0d2-6f1e9b7c3a12"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Запрос из 1С (унифицированная форма-чат).\n// Поддерживаем несколько вариантов имён полей.\nconst b = $json.body || {};\n\nconst message = String(b.chatInput ?? b.message ?? b.question ?? '').trim();\nconst userLogin = String(b.userLogin ?? b.user ?? b.username ?? b.login ?? '').trim();\n\nif (!message) {\n  throw new Error('Пустое сообщение: ожидается поле chatInput');\n}\nif (!userLogin) {\n  throw new Error('Не передана доменная учётная запись: ожидается поле userLogin');\n}\n\nconst requestId = String(b.requestId ?? b.request_id ?? `1c-${$execution.id}`);\n\nreturn [\n  {\n    json: {\n      source: '1c',\n      message,\n      requestId,\n      requestDt: b.requestDt || new Date().toISOString(),\n      sessionId: String(b.sessionId ?? b.session_id ?? requestId),\n      userLogin,              // DOMAIN\\Login, одинарный обратный слеш\n      userName: userLogin,\n      channelId: null,\n      rootId: null,\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        0
+      ],
+      "id": "ce62c449-73e7-432b-9079-ba361ffea8c7",
+      "name": "Normalize 1C Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Общий контекст для обеих точек входа (Mattermost и 1С)\nconst fromMM = $('Normalize Mattermost Message').isExecuted;\n\nlet ctx;\n\nif (fromMM) {\n  const n = $('Normalize Mattermost Message').first().json;\n  const d = $('Code in JavaScript Get Date').first().json;\n  ctx = {\n    source: 'mattermost',\n    message: n.message,\n    requestId: n.postId,\n    requestDt: d.time_data,\n    sessionId: n.sessionId,\n    userLogin: $json.username,\n    userName: n.raw?.data?.sender_name || '',\n    channelId: n.channelId,\n    rootId: n.rootId,\n  };\n} else {\n  ctx = { ...$json };\n}\n\nreturn [{ json: ctx }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1008,
+        192
+      ],
+      "id": "c570e265-016a-4891-8acb-13e7c9448c85",
+      "name": "Unified Context"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://cb2.mbs.media/Connector1C/hs/RPA",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Basic ***"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ Method: 'GetPhisicalCode', ObjectSID: $json.userLogin, 'сhanel': 'telegram' }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1216,
+        192
+      ],
+      "id": "2422bdc4-aee9-4773-9967-1a3e6f4a049b",
+      "name": "HTTP Request GET Asset Info From 1C",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api-do.nmgtech.ru:8097/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  messages: [\n    { role: 'user', content: $('Unified Context').first().json.message }\n  ],\n  model: 'nmg_technical_support_chatbot',\n  metadata: {\n    groups: ['1C', 'DWH'],\n    request_id: $('Unified Context').first().json.requestId,\n    request_dt: $('Unified Context').first().json.requestDt,\n    entity_id: [\n      { type: 'ИНН', value: $json['КадроваяИнформация']?.[0]?.['ИННОрганизация'] || '' }\n    ],\n    use_history: true,\n    show_source: true,\n    relevance_threshold: 0\n  },\n  user: $('Unified Context').first().json.userName\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1408,
+        192
+      ],
+      "id": "a20eedb6-4aa7-4629-becf-683ce953ae6d",
+      "name": "HTTP Request to Assistant Chatbot Experimental",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "I76EZYHx9Om5Ru4p",
+          "name": "Bearer Auth account 4"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "e6a1c3f8-2b49-4d7e-9f05-8c3d1a6b2e44",
+              "leftValue": "={{ $('Unified Context').first().json.source }}",
+              "rightValue": "1c",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1616,
+        192
+      ],
+      "id": "c6b4ba62-dbf7-4f52-8499-9e6744ebd0c3",
+      "name": "If Source is 1C"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ output: $json.choices?.[0]?.message?.content || ('Не удалось получить ответ от базы знаний' + ($json.error ? ': ' + ($json.error.message || $json.error) : '')) }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1776,
+        0
+      ],
+      "id": "57a0b210-5231-482d-b438-26924cc292c4",
+      "name": "Respond to 1C"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://sync.iz.ru/api/v4/posts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer ***"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "channel_id",
+              "value": "={{ $('Unified Context').first().json.channelId }}"
+            },
+            {
+              "name": "root_id",
+              "value": "={{ $('Unified Context').first().json.rootId }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $json.choices?.[0]?.message?.content || 'Не удалось получить ответ от базы знаний' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1840,
+        208
+      ],
+      "id": "f30072ce-5a4e-4764-841a-ca1487540895",
+      "name": "Send Mattermost Reply"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Mattermost Trigger Assistant 1C Sync Bot": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Normalize Mattermost Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Mattermost Message": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript Get Date",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript Get Date": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request GET User Info from Sync",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request GET User Info from Sync": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields - convert Username",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields - convert Username": {
+      "main": [
+        [
+          {
+            "node": "Unified Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook 1C": {
+      "main": [
+        [
+          {
+            "node": "Normalize 1C Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize 1C Request": {
+      "main": [
+        [
+          {
+            "node": "Unified Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unified Context": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request GET Asset Info From 1C",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request GET Asset Info From 1C": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request to Assistant Chatbot Experimental",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request to Assistant Chatbot Experimental": {
+      "main": [
+        [
+          {
+            "node": "If Source is 1C",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Source is 1C": {
+      "main": [
+        [
+          {
+            "node": "Respond to 1C",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Mattermost Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "976f4005-0073-4b59-99f2-fafa384f6530",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bccba1f23f710198a673acd7f94582935a0743ece25faeefd8ec6d64ac19e074"
+  },
+  "nodeGroups": [],
+  "id": "s8ti89AqFA2rY43t",
+  "tags": []
+}
